@@ -48,7 +48,7 @@ export default function App() {
   const [searchHistory, setSearchHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState(null);
-  const [audioChunks, setAudioChunks] = useState([]);
+  const audioChunksRef = useRef([]);
 
   // Animation Values
   const micPulse = useRef(new Animated.Value(1)).current;
@@ -160,7 +160,7 @@ export default function App() {
     Animated.timing(resultCardSlide, {
       toValue: { x: 0, y: 0 },
       duration: 500,
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== 'web',
     }).start();
   };
 
@@ -169,7 +169,7 @@ export default function App() {
     Animated.timing(errorSlide, {
       toValue: { x: 0, y: 0 },
       duration: 400,
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== 'web',
     }).start();
   };
 
@@ -214,15 +214,24 @@ export default function App() {
       if (Platform.OS === 'web') {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         const recorder = new MediaRecorder(stream);
-        const chunks = [];
+        audioChunksRef.current = [];
 
         recorder.ondataavailable = (event) => {
-          chunks.push(event.data);
+          if (event.data.size > 0) {
+            audioChunksRef.current.push(event.data);
+          }
         };
 
         recorder.onstop = async () => {
-          const audioBlob = new Blob(chunks, { type: 'audio/webm' });
-          setAudioChunks(chunks);
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          
+          if (audioBlob.size === 0) {
+            setError('Không ghi nhận được âm thanh. Vui lòng thử lại.');
+            animateErrorIn();
+            setIsAnalyzing(false);
+            return;
+          }
+
           const reader = new FileReader();
           reader.onloadend = async () => {
             await analyzeWebAudio(audioBlob);
@@ -493,14 +502,6 @@ export default function App() {
           <Text style={styles.subtitle}>Identify Music Instantly</Text>
         </View>
 
-        {/* History Button */}
-        <TouchableOpacity
-          style={styles.historyButton}
-          onPress={() => setShowHistory(true)}
-        >
-          <Text style={styles.historyButtonText}>📜 History ({searchHistory.length})</Text>
-        </TouchableOpacity>
-
         {/* Error Alert */}
         {error && (
           <Animated.View
@@ -591,6 +592,34 @@ export default function App() {
                 </Text>
               </TouchableOpacity>
             </Animated.View>
+          )}
+
+          {/* Recent History Preview (FR-09 update) */}
+          {!isRecording && !isAnalyzing && songResults.length === 0 && searchHistory.length > 0 && (
+            <View style={styles.recentHistoryContainer}>
+              <Text style={styles.recentHistoryTitle}>Recent Searches</Text>
+              {searchHistory.slice(0, 3).map((item) => (
+                <TouchableOpacity 
+                  key={item.id} 
+                  style={styles.recentHistoryItem}
+                  onPress={() => revisitHistoryItem(item)}
+                >
+                  <View style={styles.recentHistoryItemContent}>
+                    <Text style={styles.recentHistoryItemText} numberOfLines={1}>
+                      🔍 {item.recognizedText}
+                    </Text>
+                    <Text style={styles.recentHistoryItemTime}>{item.timestamp}</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+              
+              <TouchableOpacity 
+                style={styles.seeAllButton}
+                onPress={() => setShowHistory(true)}
+              >
+                <Text style={styles.seeAllButtonText}>📜 View Full History ({searchHistory.length})</Text>
+              </TouchableOpacity>
+            </View>
           )}
         </View>
 
@@ -1211,5 +1240,54 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     letterSpacing: 0.5,
+  },
+
+  // Recent History (Home Screen)
+  recentHistoryContainer: {
+    width: '100%',
+    marginTop: 30,
+    backgroundColor: COLORS.card,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+  },
+  recentHistoryTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.accentPurple,
+    marginBottom: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  recentHistoryItem: {
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+  },
+  recentHistoryItemContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  recentHistoryItemText: {
+    flex: 1,
+    color: COLORS.text,
+    fontSize: 14,
+    marginRight: 10,
+  },
+  recentHistoryItemTime: {
+    color: COLORS.textSecondary,
+    fontSize: 10,
+  },
+  seeAllButton: {
+    marginTop: 15,
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  seeAllButtonText: {
+    color: COLORS.accentBlue,
+    fontSize: 13,
+    fontWeight: '600',
   },
 });
