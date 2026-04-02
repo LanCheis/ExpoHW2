@@ -335,6 +335,39 @@ export default function App() {
     return words.join(' ').trim();
   };
 
+  const searchSongByLyrics = async (lyrics) => {
+    try {
+      const apiKey = process.env.EXPO_PUBLIC_AUDD_API_KEY || 'your_audd_api_key_here';
+      
+      const response = await axios.get('https://api.audd.io/findLyrics/', {
+        params: {
+          api_token: apiKey,
+          q: lyrics,
+        },
+        timeout: 30000,
+      });
+
+      if (response.data && response.data.status === 'success' && response.data.result.length > 0) {
+        // FR-06: Map results to our app's format
+        return response.data.result.map((item, index) => ({
+          id: index + 1,
+          title: item.title,
+          artist: item.artist,
+          album: 'Lyrics Match',
+          album_art: null, // Lyrics API usually doesn't provide art directly
+          confidence: 'Match',
+          source: 'AudD Lyrics',
+          lyrics: item.lyrics, // Optional part of the lyrics
+        }));
+      } else {
+        return [];
+      }
+    } catch (err) {
+      console.error('Song search error:', err);
+      return [];
+    }
+  };
+
   const performSpeechToText = async (formData) => {
     try {
       const apiKey = process.env.EXPO_PUBLIC_GROQ_API_KEY || 'your_groq_api_key_here';
@@ -357,22 +390,21 @@ export default function App() {
         
         // FR-04: Analyze and clean recognized text
         const cleanedTranscript = cleanLyricsText(rawTranscript);
-          
         setRecognizedText(cleanedTranscript);
         
-        // Temporarily mock song results until FR-05 is implemented
-        const mockResults = [
-          {
-            id: 1,
-            title: 'Chờ tìm bài hát...',
-            artist: 'Đang chờ FR-05',
-            confidence: '100%',
-            source: 'Groq Whisper',
-          }
-        ];
-        setSongResults(mockResults);
-        await saveToHistory(cleanedTranscript, mockResults);
-        animateResultsIn();
+        // FR-05: Search for the song using lyrics
+        const results = await searchSongByLyrics(cleanedTranscript);
+
+        if (results.length > 0) {
+          // FR-06: Display Results
+          setSongResults(results);
+          await saveToHistory(cleanedTranscript, results);
+          animateResultsIn();
+        } else {
+          // FR-06: Not found message
+          setError('Không tìm thấy bài hát phù hợp.');
+          animateErrorIn();
+        }
       } else {
         setError('Không thể nhận diện được lời thoại. Vui lòng thử lại.'); // FR-07
         animateErrorIn();
