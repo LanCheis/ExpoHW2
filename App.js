@@ -47,8 +47,16 @@ export default function App() {
   const [selectedResult, setSelectedResult] = useState(null);
   const [searchHistory, setSearchHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [selectedLanguage, setSelectedLanguage] = useState('vi');
   const [mediaRecorder, setMediaRecorder] = useState(null);
   const audioChunksRef = useRef([]);
+
+  // Audio Playback State (FR-11)
+  const [sound, setSound] = useState(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackStatus, setPlaybackStatus] = useState(null);
+  const [showPlayer, setShowPlayer] = useState(false);
+  const [activeSong, setActiveSong] = useState(null);
 
   // Animation Values
   const micPulse = useRef(new Animated.Value(1)).current;
@@ -291,7 +299,7 @@ export default function App() {
       const formData = new FormData();
       formData.append('file', audioBlob, 'recording.webm');
       formData.append('model', 'whisper-large-v3');
-      formData.append('language', 'vi'); // Default to Vietnamese for FR-10 baseline
+      formData.append('language', selectedLanguage); // FR-10: Use selected language
       
       await performSpeechToText(formData);
     } catch (err) {
@@ -313,7 +321,7 @@ export default function App() {
         name: fileName,
       });
       formData.append('model', 'whisper-large-v3');
-      formData.append('language', 'vi');
+      formData.append('language', selectedLanguage); // FR-10: Use selected language
       
       await performSpeechToText(formData);
     } catch (err) {
@@ -357,17 +365,47 @@ export default function App() {
       });
 
       if (response.data && response.data.status === 'success' && response.data.result.length > 0) {
-        // FR-06: Map results to our app's format
-        return response.data.result.map((item, index) => ({
-          id: index + 1,
-          title: item.title,
-          artist: item.artist,
-          album: 'Lyrics Match',
-          album_art: null, // Lyrics API usually doesn't provide art directly
-          confidence: 'Match',
-          source: 'AudD Lyrics',
-          lyrics: item.lyrics, // Optional part of the lyrics
-        }));
+        // FR-11: For each result, try to get a preview URL and official link from iTunes
+        const enrichedResults = await Promise.all(
+          response.data.result.slice(0, 5).map(async (item, index) => {
+            let previewUrl = null;
+            let externalUrl = null;
+            let albumArt = null;
+
+            try {
+              const itunesRes = await axios.get('https://itunes.apple.com/search', {
+                params: {
+                  term: `${item.artist} ${item.title}`,
+                  media: 'music',
+                  limit: 1,
+                },
+              });
+
+              if (itunesRes.data.results.length > 0) {
+                const track = itunesRes.data.results[0];
+                previewUrl = track.previewUrl;
+                externalUrl = track.trackViewUrl;
+                albumArt = track.artworkUrl100;
+              }
+            } catch (e) {
+              console.error('iTunes search error:', e);
+            }
+
+            return {
+              id: index + 1,
+              title: item.title,
+              artist: item.artist,
+              album: item.album || 'Unknown Album',
+              album_art: albumArt,
+              confidence: 'Match',
+              source: 'AudD + iTunes',
+              preview_url: previewUrl,
+              external_url: externalUrl,
+              lyrics: item.lyrics,
+            };
+          })
+        );
+        return enrichedResults;
       } else {
         return [];
       }
@@ -473,6 +511,78 @@ export default function App() {
     }
   };
 
+  const handlePlayPreview = async (song) => {
+    try {
+      if (!song.preview_url) {
+        setError('No preview available for this song.');
+        animateErrorIn();
+        return;
+      }
+
+      if (sound) {
+        await sound.terminateAsync();
+        setSound(null);
+      }
+
+      const { sound: newSound } = await AudioModule.Audio.createAsync(
+        { uri: song.preview_url },
+        { shouldPlay: true },
+        (status) => setPlaybackStatus(status)
+      );
+
+      setSound(newSound);
+      setIsPlaying(true);
+      setActiveSong(song);
+      setShowPlayer(true);
+    } catch (err) {
+      console.error('Playback error:', err);
+      setError('Could not play preview.');
+      animateErrorIn();
+    }
+  };
+
+  const togglePlayback = async () => {
+    if (sound) {
+      if (isPlaying) {
+        await sound.pauseAsync();
+      } else {
+        await sound.playAsync();
+      }
+      setIsPlaying(!isPlaying);
+    }
+  };
+
+  const resetToStart = async () => {
+    if (sound) {
+      await sound.setPositionAsync(0);
+      await sound.playAsync();
+      setIsPlaying(true);
+    }
+  };
+
+  const skipForward = async () => {
+    if (sound && playbackStatus) {
+      const newPos = Math.min(playbackStatus.durationMillis, playbackStatus.positionMillis + 10000);
+      await sound.setPositionAsync(newPos);
+    }
+  };
+
+  const skipBackward = async () => {
+    if (sound && playbackStatus) {
+      const newPos = Math.max(0, playbackStatus.positionMillis - 10000);
+      await sound.setPositionAsync(newPos);
+    }
+  };
+
+  const closePlayer = async () => {
+    if (sound) {
+      await sound.terminateAsync();
+      setSound(null);
+    }
+    setIsPlaying(false);
+    setShowPlayer(false);
+  };
+
   const resetApp = () => {
     setRecording(null);
     setIsRecording(false);
@@ -525,6 +635,22 @@ export default function App() {
 
         {/* Main Content */}
         <View style={styles.mainContent}>
+          {/* Language Toggle (FR-10) */}
+          <View style={styles.languageToggleContainer}>
+            <TouchableOpacity 
+              style={[styles.languageOption, selectedLanguage === 'vi' && styles.languageOptionActive]}
+              onPress={() => setSelectedLanguage('vi')}
+            >
+              <Text style={[styles.languageOptionText, selectedLanguage === 'vi' && styles.languageOptionTextActive]}>🇻🇳 VN</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={[styles.languageOption, selectedLanguage === 'en' && styles.languageOptionActive]}
+              onPress={() => setSelectedLanguage('en')}
+            >
+              <Text style={[styles.languageOptionText, selectedLanguage === 'en' && styles.languageOptionTextActive]}>🇺🇸 EN</Text>
+            </TouchableOpacity>
+          </View>
+
           {/* Microphone Icon - Animated */}
           <Animated.View
             style={[
@@ -655,42 +781,50 @@ export default function App() {
               keyExtractor={(item) => item.id.toString()}
               scrollEnabled={false}
               renderItem={({ item, index }) => (
-                <TouchableOpacity
-                  style={[
-                    styles.resultCard,
-                    selectedResult?.id === item.id && styles.resultCardSelected
-                  ]}
-                  onPress={() => setSelectedResult(item)}
-                >
-                  {/* Album Art */}
-                  {item.album_art ? (
-                    <Image
-                      source={{ uri: item.album_art }}
-                      style={styles.resultAlbumArt}
-                    />
-                  ) : (
-                    <View style={styles.resultAlbumArtPlaceholder}>
-                      <Text style={styles.placeholderIcon}>🎶</Text>
-                    </View>
-                  )}
+                <View style={styles.resultItemWrapper}>
+                  <TouchableOpacity
+                    style={[
+                      styles.resultCard,
+                      selectedResult?.id === item.id && styles.resultCardSelected
+                    ]}
+                    onPress={() => setSelectedResult(item)}
+                  >
+                    {/* Album Art */}
+                    {item.album_art ? (
+                      <Image
+                        source={{ uri: item.album_art }}
+                        style={styles.resultAlbumArt}
+                      />
+                    ) : (
+                      <View style={styles.resultAlbumArtPlaceholder}>
+                        <Text style={styles.placeholderIcon}>🎶</Text>
+                      </View>
+                    )}
 
-                  {/* Song Info */}
-                  <View style={styles.resultInfo}>
-                    <View style={styles.resultTitleRow}>
-                      <Text style={styles.resultNumber}>#{index + 1}</Text>
-                      <Text style={styles.resultConfidence}>{item.confidence}</Text>
+                    {/* Song Info */}
+                    <View style={styles.resultInfo}>
+                      <View style={styles.resultTitleRow}>
+                        <Text style={styles.resultNumber}>#{index + 1}</Text>
+                        <Text style={styles.resultConfidence}>{item.confidence}</Text>
+                      </View>
+                      <Text style={styles.resultSongTitle} numberOfLines={2}>
+                        {item.title}
+                      </Text>
+                      <Text style={styles.resultSongArtist} numberOfLines={1}>
+                        {item.artist}
+                      </Text>
+                      <Text style={styles.resultSource}>{item.source}</Text>
                     </View>
-                    <Text style={styles.resultSongTitle} numberOfLines={2}>
-                      {item.title}
-                    </Text>
-                    <Text style={styles.resultSongArtist} numberOfLines={1}>
-                      {item.artist}
-                    </Text>
-                    <Text style={styles.resultSource}>{item.source}</Text>
-                  </View>
+                  </TouchableOpacity>
 
-                  <Text style={styles.resultArrow}>›</Text>
-                </TouchableOpacity>
+                  {/* Play Button (FR-11) */}
+                  <TouchableOpacity 
+                    style={styles.previewPlayBtn}
+                    onPress={() => handlePlayPreview(item)}
+                  >
+                    <Text style={styles.previewPlayIcon}>▶️</Text>
+                  </TouchableOpacity>
+                </View>
               )}
             />
 
@@ -772,6 +906,69 @@ export default function App() {
             )}
           </View>
         </SafeAreaView>
+      </Modal>
+
+      {/* Song Player Modal (FR-11) */}
+      <Modal
+        visible={showPlayer}
+        transparent
+        animationType="slide"
+        onRequestClose={closePlayer}
+      >
+        <View style={styles.playerModalContainer}>
+          <View style={styles.playerContent}>
+            <TouchableOpacity style={styles.playerCloseBtn} onPress={closePlayer}>
+              <Text style={styles.playerCloseText}>✕</Text>
+            </TouchableOpacity>
+
+            <Image 
+              source={{ uri: activeSong?.album_art || 'https://via.placeholder.com/200' }} 
+              style={styles.playerAlbumArt} 
+            />
+            
+            <Text style={styles.playerTitle} numberOfLines={1}>{activeSong?.title}</Text>
+            <Text style={styles.playerArtist}>{activeSong?.artist}</Text>
+
+            {/* Playback Controls (FR-11 requirements) */}
+            <View style={styles.playbackControls}>
+              <TouchableOpacity onPress={resetToStart} style={styles.controlBtn}>
+                <Text style={styles.controlIcon}>⏮️</Text>
+                <Text style={styles.controlLabel}>Reset</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity onPress={skipBackward} style={styles.controlBtn}>
+                <Text style={styles.controlIcon}>⏪</Text>
+                <Text style={styles.controlLabel}>-10s</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity onPress={togglePlayback} style={[styles.controlBtn, styles.playPauseBtn]}>
+                <Text style={styles.playPauseIcon}>{isPlaying ? '⏸️' : '▶️'}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity onPress={skipForward} style={styles.controlBtn}>
+                <Text style={styles.controlIcon}>⏩</Text>
+                <Text style={styles.controlLabel}>+10s</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Official Links */}
+            <View style={styles.linksContainer}>
+              <TouchableOpacity 
+                style={[styles.linkBtn, { backgroundColor: '#1DB954' }]}
+                onPress={() => activeSong?.external_url && window.open(activeSong.external_url, '_blank')}
+              >
+                <Text style={styles.linkText}>Spotify</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.linkBtn, { backgroundColor: '#FF0000' }]}
+                onPress={() => window.open(`https://www.youtube.com/results?search_query=${activeSong?.artist}+${activeSong?.title}`, '_blank')}
+              >
+                <Text style={styles.linkText}>YouTube</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -1289,5 +1486,141 @@ const styles = StyleSheet.create({
     color: COLORS.accentBlue,
     fontSize: 13,
     fontWeight: '600',
+  },
+
+  // Language Toggle
+  languageToggleContainer: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.card,
+    borderRadius: 20,
+    padding: 4,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  languageOption: {
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+  },
+  languageOptionActive: {
+    backgroundColor: COLORS.accentPurple,
+  },
+  languageOptionText: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  languageOptionTextActive: {
+    color: COLORS.text,
+  },
+
+  // Results Update
+  resultItemWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 12,
+  },
+  previewPlayBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.accentBlue,
+    justifyContent: 'center',
+    alignItems: 'center',
+    boxShadow: '0px 4px 8px rgba(59,130,246,0.3)',
+    elevation: 4,
+  },
+  previewPlayIcon: {
+    fontSize: 18,
+  },
+
+  // Player Modal
+  playerModalContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    justifyContent: 'flex-end',
+  },
+  playerContent: {
+    backgroundColor: COLORS.background,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    padding: 30,
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+  },
+  playerCloseBtn: {
+    alignSelf: 'flex-end',
+    padding: 10,
+  },
+  playerCloseText: {
+    color: COLORS.textSecondary,
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  playerAlbumArt: {
+    width: 200,
+    height: 200,
+    borderRadius: 20,
+    marginBottom: 20,
+    boxShadow: '0px 10px 20px rgba(0,0,0,0.5)',
+  },
+  playerTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: 4,
+  },
+  playerArtist: {
+    fontSize: 16,
+    color: COLORS.accentPurple,
+    marginBottom: 30,
+  },
+  playbackControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 25,
+    marginBottom: 40,
+  },
+  controlBtn: {
+    alignItems: 'center',
+  },
+  controlIcon: {
+    fontSize: 24,
+    marginBottom: 4,
+  },
+  controlLabel: {
+    fontSize: 10,
+    color: COLORS.textSecondary,
+    textTransform: 'uppercase',
+  },
+  playPauseBtn: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: COLORS.accentBlue,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  playPauseIcon: {
+    fontSize: 32,
+  },
+  linksContainer: {
+    flexDirection: 'row',
+    gap: 15,
+    width: '100%',
+  },
+  linkBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  linkText: {
+    color: COLORS.text,
+    fontWeight: '700',
   },
 });
