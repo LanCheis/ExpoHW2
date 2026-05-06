@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -27,9 +28,6 @@ const AUDD_API_TOKEN = appExtra.auddApiToken ?? '';
 const LANGUAGE_OPTIONS = [
   { label: 'Vietnamese', value: 'vi' },
   { label: 'English', value: 'en' },
-  { label: 'Spanish', value: 'es' },
-  { label: 'Japanese', value: 'ja' },
-  { label: 'Korean', value: 'ko' },
 ];
 
 type SongResult = {
@@ -368,11 +366,13 @@ export default function App() {
       body: JSON.stringify({
         audio_url: audioUrl,
         language_code: lang,
+        speech_models: ['universal-2'],
       }),
     });
 
     if (!response.ok) {
-      throw new Error('Transcript request failed');
+      const errBody = await response.text().catch(() => '');
+      throw new Error(`Transcript request failed (${response.status}): ${errBody}`);
     }
 
     const data = await response.json();
@@ -583,46 +583,47 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar style="light" />
+      <StatusBar style="dark" />
       <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>Ứng dụng nhận diện tên bài nhạc</Text>
-        <Text style={styles.subtitle}>Từ lời thoại với AssemblyAI + Genius</Text>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Ngôn ngữ nhận diện</Text>
-          <View style={styles.languageRow}>
-            {LANGUAGE_OPTIONS.map((option) => (
-              <Pressable
-                key={option.value}
-                onPress={() => setLanguage(option.value)}
+        <Text style={styles.title}>LyricFind</Text>
+        <Text style={styles.subtitle}>Recognize songs by voice</Text>
+
+        <View style={styles.languageRow}>
+          {LANGUAGE_OPTIONS.map((option) => (
+            <Pressable
+              key={option.value}
+              onPress={() => setLanguage(option.value)}
+              style={[
+                styles.languageChip,
+                language === option.value && styles.languageChipActive,
+              ]}
+            >
+              <Text
                 style={[
-                  styles.languageChip,
-                  language === option.value && styles.languageChipActive,
+                  styles.languageText,
+                  language === option.value && styles.languageTextActive,
                 ]}
               >
-                <Text
-                  style={[
-                    styles.languageText,
-                    language === option.value && styles.languageTextActive,
-                  ]}
-                >
-                  {option.label}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
+                {option.label}
+              </Text>
+            </Pressable>
+          ))}
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Ghi âm</Text>
-          <View style={styles.controls}>
-            <Pressable
-              onPress={startRecording}
-              disabled={isRecording || isTranscribing}
-              style={[styles.button, (isRecording || isTranscribing) && styles.buttonDisabled]}
-            >
-              <Text style={styles.buttonText}>Record</Text>
-            </Pressable>
+        <View style={styles.heroSection}>
+          <Pressable
+            onPress={startRecording}
+            disabled={isRecording || isTranscribing}
+            style={[
+              styles.micButton,
+              (isRecording || isTranscribing) && styles.micButtonDisabled,
+              isRecording && styles.micButtonRecording,
+            ]}
+          >
+            <Text style={styles.micIcon}>●</Text>
+          </Pressable>
+          <View style={styles.heroControls}>
             <Pressable
               onPress={stopRecording}
               disabled={!isRecording}
@@ -634,69 +635,56 @@ export default function App() {
               <Text style={styles.buttonSecondaryText}>Clear</Text>
             </Pressable>
           </View>
-
-          {isTranscribing && (
-            <View style={styles.loadingRow}>
-              <ActivityIndicator color="#FFB703" />
-              <Text style={styles.loadingText}>{statusMessage || 'Đang xử lý...'}</Text>
-            </View>
-          )}
-
-          {!isTranscribing && statusMessage.length > 0 && (
-            <View style={styles.loadingRow}>
-              <ActivityIndicator color="#38BDF8" />
-              <Text style={styles.loadingText}>{statusMessage}</Text>
-            </View>
-          )}
-
-          {isRecording && (
-            <View style={styles.vuWrapper}>
-              <Text style={styles.vuLabel}>Đang lắng nghe (đoạn {Math.max(chunkCount, 1)})</Text>
-              <View style={styles.vuTrack}>
-                <View style={[styles.vuFill, { width: `${Math.round(vuLevel * 100)}%` }]} />
-              </View>
-            </View>
-          )}
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Văn bản nhận diện</Text>
-          <View style={styles.card}>
-            <Text style={styles.cardText}>
-              {transcriptText || 'Chưa có dữ liệu.'}
-            </Text>
+        {isRecording && (
+          <View style={styles.vuWrapper}>
+            <Text style={styles.vuLabel}>Listening · chunk {Math.max(chunkCount, 1)}</Text>
+            <View style={styles.vuTrack}>
+              <View style={[styles.vuFill, { width: `${Math.round(vuLevel * 100)}%` }]} />
+            </View>
           </View>
-        </View>
+        )}
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Văn bản đã làm sạch</Text>
-          <View style={styles.card}>
-            <Text style={styles.cardText}>
-              {cleanedText || 'Chưa có dữ liệu.'}
-            </Text>
+        {(isTranscribing || statusMessage.length > 0) && (
+          <View style={styles.loadingRow}>
+            <ActivityIndicator color="#CC785C" />
+            <Text style={styles.loadingText}>{statusMessage || 'Processing...'}</Text>
           </View>
-        </View>
+        )}
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Kết quả</Text>
+          <Text style={styles.sectionTitle}>Result</Text>
           <View style={styles.card}>
             {songResult ? (
               <>
-                <Text style={styles.resultTitle}>{songResult.title}</Text>
-                <Text style={styles.resultArtist}>{songResult.artist}</Text>
-                {bestScore > 0 && (
-                  <Text style={styles.resultConfidence}>
-                    Độ tin cậy: {Math.round(bestScore * 100)}%
-                  </Text>
-                )}
-                <Text style={styles.resultSource}>
-                  Nguồn nhận diện: {songResult.source === 'audd' ? 'AudD (nhạc)' : 'Genius (lyrics)'}
-                </Text>
+                <View style={styles.resultRow}>
+                  {songResult.imageUrl ? (
+                    <Image source={{ uri: songResult.imageUrl }} style={styles.albumArt} />
+                  ) : (
+                    <View style={styles.albumArtPlaceholder} />
+                  )}
+                  <View style={styles.resultInfo}>
+                    <Text style={styles.resultTitle}>{songResult.title}</Text>
+                    <Text style={styles.resultArtist}>{songResult.artist}</Text>
+                    {bestScore > 0 && (
+                      <View style={styles.confidenceRow}>
+                        <View style={styles.confidenceBar}>
+                          <View style={[styles.confidenceFill, { width: `${Math.round(bestScore * 100)}%` }]} />
+                        </View>
+                        <Text style={styles.confidenceText}>{Math.round(bestScore * 100)}%</Text>
+                      </View>
+                    )}
+                    <Text style={styles.resultSource}>
+                      via {songResult.source === 'audd' ? 'AudD' : 'Genius'}
+                    </Text>
+                  </View>
+                </View>
                 <Text style={styles.resultSnippet}>
-                  Khớp theo lời thoại: "{cleanedText.slice(0, 120)}"
+                  Matched lyrics: &quot;{cleanedText.slice(0, 120)}&quot;
                 </Text>
                 <Text style={styles.resultLink}>
-                  Link: {songResult.songUrl || 'Không có'}
+                  {songResult.songUrl || 'No link'}
                 </Text>
                 {songResult.previewUrl ? (
                   <Pressable
@@ -704,31 +692,38 @@ export default function App() {
                     style={[styles.button, styles.previewButton]}
                   >
                     <Text style={styles.buttonText}>
-                      {isPreviewPlaying ? 'Dừng nghe thử' : 'Nghe thử 30s'}
+                      {isPreviewPlaying ? 'Stop Preview' : '▶  Preview 30s'}
                     </Text>
                   </Pressable>
                 ) : (
-                  <Text style={styles.mutedText}>Bài này không có preview.</Text>
+                  <Text style={styles.mutedText}>No preview available.</Text>
                 )}
               </>
             ) : (
-              <Text style={styles.cardText}>Không tìm thấy bài hát phù hợp.</Text>
+              <Text style={styles.cardText}>No match found.</Text>
             )}
           </View>
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Gợi ý (live)</Text>
+          <Text style={styles.sectionTitle}>Top Matches</Text>
           {candidates.length === 0 ? (
-            <Text style={styles.mutedText}>Chưa có gợi ý.</Text>
+            <Text style={styles.mutedText}>No suggestions yet.</Text>
           ) : (
             candidates.map((item) => (
               <View key={item.id} style={styles.candidateItem}>
-                <Text style={styles.candidateTitle}>{item.title}</Text>
-                <Text style={styles.candidateArtist}>{item.artist}</Text>
-                <Text style={styles.candidateScore}>Độ tin cậy: {Math.round(item.score * 100)}%</Text>
+                <View style={styles.candidateHeader}>
+                  <View style={styles.candidateMeta}>
+                    <Text style={styles.candidateTitle}>{item.title}</Text>
+                    <Text style={styles.candidateArtist}>{item.artist}</Text>
+                  </View>
+                  <Text style={styles.candidateScore}>{Math.round(item.score * 100)}%</Text>
+                </View>
+                <View style={styles.confidenceBar}>
+                  <View style={[styles.confidenceFill, { width: `${Math.round(item.score * 100)}%` }]} />
+                </View>
                 <Text style={styles.candidateSource}>
-                  Nguồn: {item.source === 'audd' ? 'AudD' : 'Genius'}
+                  {item.source === 'audd' ? 'AudD' : 'Genius'}
                 </Text>
               </View>
             ))
@@ -742,27 +737,46 @@ export default function App() {
         )}
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Lịch sử tìm kiếm</Text>
+          <Text style={styles.sectionTitle}>Transcript</Text>
+          <View style={styles.card}>
+            <Text style={styles.cardText}>
+              {transcriptText || 'No data yet.'}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Cleaned Text</Text>
+          <View style={styles.card}>
+            <Text style={styles.cardText}>
+              {cleanedText || 'No data yet.'}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>History</Text>
           {history.length === 0 ? (
-            <Text style={styles.mutedText}>Chưa có lịch sử.</Text>
+            <Text style={styles.mutedText}>No history yet.</Text>
           ) : (
             history.map((item) => (
               <View key={item.id} style={styles.historyItem}>
                 <Text style={styles.historyDate}>{item.createdAt}</Text>
-                <Text style={styles.historyText}>Nhận diện: {item.transcript}</Text>
-                <Text style={styles.historyText}>Làm sạch: {item.cleaned}</Text>
-                <Text style={styles.historyText}>
-                  Kết quả: {item.result ? item.result.fullTitle : 'Không tìm thấy'}
+                <Text style={styles.historyTitle}>
+                  {item.result ? item.result.fullTitle : 'Not found'}
                 </Text>
+                <Text style={styles.historyMuted}>{item.transcript}</Text>
+                <Text style={styles.historyMuted}>{item.cleaned}</Text>
                 {item.result && (
-                  <Text style={styles.historyText}>
-                    Nguồn: {item.result.source === 'audd' ? 'AudD' : 'Genius'}
+                  <Text style={styles.historySource}>
+                    {item.result.source === 'audd' ? 'AudD' : 'Genius'}
                   </Text>
                 )}
               </View>
             ))
           )}
         </View>
+
       </ScrollView>
     </SafeAreaView>
   );
@@ -771,195 +785,343 @@ export default function App() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: '#FAF9F5',
   },
   container: {
-    padding: 20,
-    paddingBottom: 40,
+    padding: 24,
+    paddingBottom: 60,
   },
+
+  // Header
   title: {
-    fontSize: 22,
-    color: '#F8FAFC',
+    fontSize: 26,
+    color: '#CC785C',
     fontWeight: '700',
+    textAlign: 'center',
+    marginTop: 8,
   },
   subtitle: {
-    color: '#94A3B8',
-    marginTop: 6,
-    marginBottom: 16,
+    color: '#9C9590',
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 4,
+    marginBottom: 24,
   },
-  section: {
-    marginTop: 18,
-  },
-  sectionTitle: {
-    color: '#E2E8F0',
-    fontWeight: '600',
-    marginBottom: 8,
-  },
+
+  // Language chips
   languageRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+    justifyContent: 'center',
+    marginBottom: 32,
   },
   languageChip: {
     borderWidth: 1,
-    borderColor: '#334155',
-    paddingHorizontal: 12,
+    borderColor: '#D6CFC4',
+    paddingHorizontal: 14,
     paddingVertical: 6,
-    borderRadius: 999,
+    borderRadius: 6,
+    backgroundColor: '#FAF9F5',
   },
   languageChipActive: {
-    backgroundColor: '#F97316',
-    borderColor: '#F97316',
+    backgroundColor: '#CC785C',
+    borderColor: '#CC785C',
   },
   languageText: {
-    color: '#CBD5F5',
+    color: '#6B6560',
+    fontSize: 13,
   },
   languageTextActive: {
-    color: '#0F172A',
+    color: '#FAF9F5',
     fontWeight: '600',
   },
-  controls: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
+
+  // Hero record section
+  heroSection: {
+    alignItems: 'center',
+    marginBottom: 28,
   },
+  micButton: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: '#CC785C',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+    borderWidth: 3,
+    borderColor: '#CC785C',
+  },
+  micButtonDisabled: {
+    opacity: 0.4,
+  },
+  micButtonRecording: {
+    borderColor: '#E8A882',
+    borderWidth: 5,
+  },
+  micIcon: {
+    fontSize: 30,
+    color: '#FAF9F5',
+  },
+  heroControls: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+
+  // Buttons
   button: {
-    backgroundColor: '#22C55E',
+    backgroundColor: '#CC785C',
     paddingVertical: 10,
-    paddingHorizontal: 16,
+    paddingHorizontal: 18,
     borderRadius: 10,
   },
   buttonDisabled: {
-    opacity: 0.5,
+    opacity: 0.4,
   },
   buttonText: {
-    color: '#0F172A',
+    color: '#FAF9F5',
     fontWeight: '700',
   },
   buttonSecondary: {
     borderWidth: 1,
-    borderColor: '#64748B',
+    borderColor: '#D6CFC4',
     paddingVertical: 10,
-    paddingHorizontal: 16,
+    paddingHorizontal: 18,
     borderRadius: 10,
+    backgroundColor: '#FAF9F5',
   },
   buttonSecondaryText: {
-    color: '#E2E8F0',
+    color: '#6B6560',
   },
   previewButton: {
-    marginTop: 10,
-    backgroundColor: '#38BDF8',
-  },
-  loadingRow: {
-    flexDirection: 'row',
+    marginTop: 12,
+    alignSelf: 'stretch',
     alignItems: 'center',
-    gap: 8,
-    marginTop: 12,
+    backgroundColor: '#7C6A52',
   },
-  loadingText: {
-    color: '#F8FAFC',
-  },
-  card: {
-    backgroundColor: '#1E293B',
-    borderRadius: 14,
-    padding: 14,
-  },
-  cardText: {
-    color: '#E2E8F0',
-    lineHeight: 20,
-  },
-  resultTitle: {
-    color: '#F8FAFC',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  resultArtist: {
-    color: '#FDBA74',
-    marginTop: 4,
-    marginBottom: 8,
-  },
-  resultConfidence: {
-    color: '#FBBF24',
-    marginBottom: 6,
-  },
-  resultSource: {
-    color: '#A5B4FC',
-    marginBottom: 8,
-  },
-  resultSnippet: {
-    color: '#CBD5F5',
-    marginBottom: 8,
-  },
-  resultLink: {
-    color: '#38BDF8',
-  },
-  errorBox: {
-    marginTop: 16,
-    padding: 12,
-    backgroundColor: '#7F1D1D',
-    borderRadius: 10,
-  },
-  errorText: {
-    color: '#FEF2F2',
-  },
-  mutedText: {
-    color: '#94A3B8',
-  },
-  historyItem: {
-    marginTop: 12,
-    padding: 12,
-    backgroundColor: '#111827',
-    borderRadius: 10,
-  },
-  historyDate: {
-    color: '#64748B',
-    fontSize: 12,
-    marginBottom: 6,
-  },
-  historyText: {
-    color: '#E2E8F0',
-    marginBottom: 4,
-  },
+
+  // VU meter
   vuWrapper: {
-    marginTop: 12,
-    padding: 10,
-    backgroundColor: '#0B1120',
-    borderRadius: 10,
+    marginBottom: 20,
   },
   vuLabel: {
-    color: '#F8FAFC',
+    color: '#6B6560',
+    fontSize: 12,
+    textAlign: 'center',
     marginBottom: 8,
   },
   vuTrack: {
-    height: 8,
-    backgroundColor: '#1F2937',
-    borderRadius: 999,
+    height: 6,
+    backgroundColor: '#D6CFC4',
+    borderRadius: 3,
     overflow: 'hidden',
   },
   vuFill: {
     height: '100%',
-    backgroundColor: '#22D3EE',
+    backgroundColor: '#CC785C',
+    borderRadius: 3,
   },
+
+  // Status / loading
+  loadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 20,
+  },
+  loadingText: {
+    color: '#6B6560',
+  },
+
+  // Sections
+  section: {
+    marginTop: 24,
+  },
+  sectionTitle: {
+    color: '#1C1917',
+    fontWeight: '600',
+    marginBottom: 10,
+    fontSize: 11,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+
+  // Cards
+  card: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#D6CFC4',
+  },
+  cardText: {
+    color: '#6B6560',
+    lineHeight: 20,
+    fontSize: 13,
+  },
+
+  // Result card
+  resultRow: {
+    flexDirection: 'row',
+    gap: 14,
+    marginBottom: 12,
+  },
+  albumArt: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    backgroundColor: '#F0EBE1',
+  },
+  albumArtPlaceholder: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    backgroundColor: '#F0EBE1',
+  },
+  resultInfo: {
+    flex: 1,
+    gap: 4,
+    justifyContent: 'center',
+  },
+  resultTitle: {
+    color: '#1C1917',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  resultArtist: {
+    color: '#CC785C',
+    fontSize: 14,
+  },
+  confidenceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 2,
+  },
+  confidenceBar: {
+    flex: 1,
+    height: 4,
+    backgroundColor: '#D6CFC4',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  confidenceFill: {
+    height: '100%',
+    backgroundColor: '#CC785C',
+    borderRadius: 2,
+  },
+  confidenceText: {
+    color: '#7C6A52',
+    fontSize: 12,
+    fontWeight: '600',
+    minWidth: 32,
+  },
+  resultSource: {
+    color: '#9C9590',
+    fontSize: 12,
+  },
+  resultSnippet: {
+    color: '#6B6560',
+    fontSize: 12,
+    marginBottom: 6,
+  },
+  resultLink: {
+    color: '#CC785C',
+    fontSize: 12,
+    marginBottom: 4,
+  },
+
+  // Candidates
   candidateItem: {
     marginTop: 10,
-    padding: 12,
-    backgroundColor: '#0B1120',
+    padding: 14,
+    backgroundColor: '#FFFFFF',
     borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#D6CFC4',
+  },
+  candidateHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  candidateMeta: {
+    flex: 1,
   },
   candidateTitle: {
-    color: '#F8FAFC',
+    color: '#1C1917',
     fontWeight: '700',
   },
   candidateArtist: {
-    color: '#A5B4FC',
+    color: '#6B6560',
     marginTop: 2,
+    fontSize: 13,
   },
   candidateScore: {
-    color: '#FBBF24',
-    marginTop: 6,
+    color: '#CC785C',
+    fontWeight: '700',
+    fontSize: 14,
   },
   candidateSource: {
-    color: '#94A3B8',
+    color: '#9C9590',
+    marginTop: 6,
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+
+  // Error
+  errorBox: {
+    marginTop: 16,
+    padding: 14,
+    backgroundColor: '#FDF0ED',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E8BFB3',
+  },
+  errorText: {
+    color: '#8B3A2A',
+  },
+
+  // Muted
+  mutedText: {
+    color: '#9C9590',
+    fontSize: 13,
+  },
+
+  // History
+  historyItem: {
+    marginTop: 10,
+    padding: 14,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#D6CFC4',
+  },
+  historyDate: {
+    color: '#9C9590',
+    fontSize: 11,
+    marginBottom: 4,
+  },
+  historyTitle: {
+    color: '#1C1917',
+    fontWeight: '600',
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  historyMuted: {
+    color: '#9C9590',
+    fontSize: 12,
     marginTop: 2,
+  },
+  historySource: {
+    color: '#CC785C',
+    fontSize: 11,
+    marginTop: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
 });
